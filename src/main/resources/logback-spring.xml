@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- 60초마다 설정 파일의 변경을 확인 하여 변경시 갱신 -->
+<!-- 설정해제, 실 운영시 해당 옵션은 오류 발생 유발 -->
+<!-- <configuration scan="true" scanPeriod="60 seconds"> -->
+<configuration>
+	<!-- pattern -->
+	<property name="LOG_PATTERN" value="%-5level %d{yy-MM-dd HH:mm:ss} [%thread] [%logger{0}:%line] - %msg%n" />
+	 
+	<!-- Console Appender -->
+	<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+			<pattern>${LOG_PATTERN}</pattern>
+		</encoder>
+	</appender>
+
+	<!-- root레벨 설정(전역) -->
+	<root level="${LOG_LEVEL}">
+		<appender-ref ref="CONSOLE" />
+	</root>
+	
+	<!-- JPA 관련 logger 설정 -->
+	<logger name="org.hibernate.SQL" level="DEBUG" />
+	<logger name="org.hibernate.type.descriptor.sql.BasicBinder" level="TRACE" />
+</configuration>
