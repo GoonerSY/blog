@@ -1,8 +1,6 @@
 package com.test.blog.controller;
 
-import com.test.blog.domain.BlogSearchReq;
-import com.test.blog.domain.BlogSearchResp;
-import com.test.blog.service.BlogService;
+import com.test.blog.service.BlogSearchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,10 +14,10 @@ public class BlogController {
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
     @Autowired
-    private BlogService blogService;
+    private BlogSearchService blogSearchService;
 
     @GetMapping(value = "/blog/search")
     public String blogSearch(@RequestParam Map<String, Object> allParameters){
-        return blogService.blogSearch(allParameters);
+        return blogSearchService.blogSearch(allParameters);
     }
 }
