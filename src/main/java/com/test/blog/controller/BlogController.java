@@ -1,12 +1,14 @@
 package com.test.blog.controller;
 
+import com.test.blog.domain.BlogSearchReq;
+import com.test.blog.domain.BlogSearchResp;
 import com.test.blog.service.BlogSearchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
+import javax.validation.Valid;
 
 @RestController
 public class BlogController {
@@ -17,7 +19,8 @@ public class BlogController {
     private BlogSearchService blogSearchService;
 
     @GetMapping(value = "/blog/search")
-    public String blogSearch(@RequestParam Map<String, Object> allParameters){
-        return blogSearchService.blogSearch(allParameters);
+    public BlogSearchResp blogSearch(@Valid @ModelAttribute BlogSearchReq blogSearchReq) throws Exception {
+        logger.info("blogSearchReq : [{}]", blogSearchReq);
+        return blogSearchService.blogSearch(blogSearchReq);
     }
 }

@@ -1,67 +1,130 @@
 package com.test.blog.service;
 
+import com.google.gson.Gson;
+import com.test.blog.domain.BlogSearchReq;
+import com.test.blog.domain.BlogSearchResp;
+import com.test.blog.domain.kakao.Documents;
+import com.test.blog.domain.kakao.Meta;
 import com.test.blog.entity.BlogSearchEntity;
 import com.test.blog.repository.BlogSearchRepository;
-import com.test.blog.util.WebClientUtil;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.util.UriComponents;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import javax.transaction.Transactional;
-import java.util.Map;
-import java.util.Map.Entry;
+import javax.validation.Valid;
+import java.text.SimpleDateFormat;
 
 @Service
+@Validated
 public class BlogSearchService {
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
-    private static final String KAKAO_DAUM_API_BASE_URI = "dapi.kakao.com";
-
-    /* DB 저장으로 변경할 것 */
-    private static final String KAKAO_APP_RESTAPI_KEY = "3838bb9d56ac50f869fa6c41e874d5cb";
-
     @Autowired
     private KakaoApiService kakaoApiService;
+    @Autowired
+    private NaverApiService naverApiService;
     @Autowired
     private BlogSearchRepository blogSearchRepository;
 
     @Transactional
-    public String blogSearch(Map<String, Object> parameters) {
-        /* 입력값 검증 */
+    public BlogSearchResp blogSearch(@Valid BlogSearchReq blogSearchReq) throws Exception {
+        /* 기본값 설정 */
+        if(blogSearchReq.getSort() == null) blogSearchReq.setSort("accuracy");
+        if(blogSearchReq.getPage() == 0) blogSearchReq.setPage(1);
+        if(blogSearchReq.getSize() == 0) blogSearchReq.setSize(10);
 
+        /* 키워드 카운팅 */
+        keywordCounting(blogSearchReq.getKeyword());
+
+        /* 요청값 쿼리스트링 변환처리 */
+        MultiValueMap<String, String> requestParams = new LinkedMultiValueMap<String, String>();
+        UriComponents uriComponents;
+        /* 카카오 API 서비스 연동 */
+        BlogSearchResp blogSearchResp;
+        try{
+            String query = blogSearchReq.getKeyword();
+            if(blogSearchReq.getTargetBlog() != null && !blogSearchReq.getTargetBlog().trim().equals("")){
+                query = blogSearchReq.getTargetBlog() + " " + blogSearchReq.getKeyword();
+            }
+            requestParams.clear();
+            requestParams.add("query", query);
+            requestParams.add("sort", blogSearchReq.getSort());
+            requestParams.add("page", String.valueOf(blogSearchReq.getPage()));
+            requestParams.add("size", String.valueOf(blogSearchReq.getSize()));
+            uriComponents = UriComponentsBuilder.newInstance().queryParams(requestParams).build();
+
+            blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "kakao", kakaoApiService.getApiCaller("/v2/search/blog" + uriComponents.toUri()));
+        } catch(Exception e) {
+            requestParams.clear();
+            requestParams.add("query", blogSearchReq.getKeyword());
+            if(blogSearchReq.getSort().equals("accuracy")) requestParams.add("sort", "sim");
+            else requestParams.add("sort", "date");
+            requestParams.add("start", String.valueOf(blogSearchReq.getPage()));
+            requestParams.add("display", String.valueOf(blogSearchReq.getSize()));
+            uriComponents = UriComponentsBuilder.newInstance().queryParams(requestParams).build();
+
+            blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "naver", naverApiService.getApiCaller("/v1/search/blog.json" + uriComponents.toUri()));
+        }
+
+        return blogSearchResp;
+    }
+
+    public void keywordCounting(String keyword) {
         /* 검색 키워드 카운팅 */
-        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword(parameters.get("query").toString());
+        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword(keyword);
         if(blogSearchEntity == null){
             blogSearchEntity = new BlogSearchEntity();
-            blogSearchEntity.setKeyword(parameters.get("query").toString());
+            blogSearchEntity.setKeyword(keyword);
             blogSearchEntity.setHitCount(1L);
         } else {
             blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
         }
         blogSearchRepository.saveAndFlush(blogSearchEntity);
+    }
 
-        /* 요청값 쿼리스트링 변환처리 */
-        MultiValueMap<String, String> requestParams = new LinkedMultiValueMap<String, String>();
-        for (Entry<String, Object> entry : parameters.entrySet()) {
-            requestParams.add(entry.getKey(), entry.getValue().toString());
+    public BlogSearchResp convertResponseData(int page, int size, String infoProvider, String responseData) throws Exception {
+        Gson gson = new Gson();
+        logger.info("responseData : [{}]", responseData);
+        BlogSearchResp blogSearchResp = new BlogSearchResp();
+        if(infoProvider.equals("kakao")){
+            blogSearchResp = gson.fromJson(responseData, BlogSearchResp.class);
+            blogSearchResp.getMeta().setInfoProvider(infoProvider);
+            blogSearchResp.getMeta().setPage(page);
+            blogSearchResp.getMeta().setSize(size);
+        } else {
+            JSONParser parser = new JSONParser();
+            JSONObject responseObject = (JSONObject) parser.parse(responseData);
+            int responsePage = Integer.parseInt(responseObject.get("start").toString());
+            int responseSize = Integer.parseInt(responseObject.get("display").toString());
+            int responseTotal = Integer.parseInt(responseObject.get("total").toString());
+
+            boolean is_end = false;
+            if(responsePage * responseSize >= responseTotal){
+                is_end = true;
+            }
+
+            blogSearchResp.setMeta(new Meta(infoProvider, responseTotal, responsePage, responseSize, is_end));
+            JSONArray items = (JSONArray)responseObject.get("items");
+            for (JSONObject item : (Iterable<JSONObject>) items) {
+                SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMdd");
+                blogSearchResp.getDocuments().add(new Documents(item.get("title").toString(),
+                        item.get("description").toString(),
+                        item.get("link").toString(),
+                        item.get("bloggername").toString(),
+                        null,
+                        formatter.parse(item.get("postdate").toString())));
+            }
         }
-        UriComponents uriComponents = UriComponentsBuilder.newInstance().queryParams(requestParams).build();
 
-        /* Webclient 생성 */
-        WebClient webClient = WebClientUtil.getBaseUrl(KAKAO_DAUM_API_BASE_URI);
-        ResponseEntity<String> responseEntityMono = webClient.get()
-                .uri("/v2/search/blog" + uriComponents.toUri())
-                .header("Authorization", "KakaoAK " + KAKAO_APP_RESTAPI_KEY)
-                .retrieve()
-                .toEntity(String.class)
-                .block();
-
-        return responseEntityMono.getBody();
+        return blogSearchResp;
     }
 }
