@@ -14,13 +14,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.util.UriComponents;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import javax.transaction.Transactional;
 import javax.validation.Valid;
 import java.text.SimpleDateFormat;
 
@@ -35,7 +35,6 @@ public class BlogSearchService {
     @Autowired
     private BlogSearchRepository blogSearchRepository;
 
-    @Transactional
     public BlogSearchResp blogSearch(@Valid BlogSearchReq blogSearchReq) throws Exception {
         /* 기본값 설정 */
         if(blogSearchReq.getSort() == null) blogSearchReq.setSort("accuracy");
@@ -78,6 +77,7 @@ public class BlogSearchService {
         return blogSearchResp;
     }
 
+    @Transactional
     public void keywordCounting(String keyword) {
         /* 검색 키워드 카운팅 */
         BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword(keyword);
@@ -103,6 +103,8 @@ public class BlogSearchService {
         } else {
             JSONParser parser = new JSONParser();
             JSONObject responseObject = (JSONObject) parser.parse(responseData);
+
+            /* Meta 객체 구성 */
             int responsePage = Integer.parseInt(responseObject.get("start").toString());
             int responseSize = Integer.parseInt(responseObject.get("display").toString());
             int responseTotal = Integer.parseInt(responseObject.get("total").toString());
@@ -112,16 +114,24 @@ public class BlogSearchService {
                 is_end = true;
             }
 
-            blogSearchResp.setMeta(new Meta(infoProvider, responseTotal, responsePage, responseSize, is_end));
+            blogSearchResp.setMeta(Meta.builder()
+                                    .infoProvider(infoProvider)
+                                    .total_count(responseTotal)
+                                    .page(responsePage)
+                                    .size(responseSize)
+                                    .is_end(is_end).build());
+
+            /* Documents 객체 구성 */
             JSONArray items = (JSONArray)responseObject.get("items");
+            SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMdd");
             for (JSONObject item : (Iterable<JSONObject>) items) {
-                SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMdd");
-                blogSearchResp.getDocuments().add(new Documents(item.get("title").toString(),
-                        item.get("description").toString(),
-                        item.get("link").toString(),
-                        item.get("bloggername").toString(),
-                        null,
-                        formatter.parse(item.get("postdate").toString())));
+                blogSearchResp.getDocuments().add(Documents.builder()
+                                                            .title(item.get("title").toString())
+                                                            .contents(item.get("description").toString())
+                                                            .url(item.get("link").toString())
+                                                            .blogname(item.get("bloggername").toString())
+                                                            .thumbnail(null)
+                                                            .datetime(formatter.parse(item.get("postdate").toString())).build());
             }
         }
 
