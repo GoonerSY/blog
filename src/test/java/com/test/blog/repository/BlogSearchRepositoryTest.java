@@ -1,64 +1,71 @@
 package com.test.blog.repository;
 
 import com.test.blog.entity.BlogSearchEntity;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
-import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.dao.PessimisticLockingFailureException;
-import org.springframework.test.context.junit.jupiter.SpringExtension;
+import org.springframework.context.annotation.Import;
+import org.springframework.stereotype.Component;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
-import javax.persistence.LockModeType;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
-@ExtendWith(SpringExtension.class)
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+
+@Component
+class AsyncTransaction {
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void run(Runnable runnable) {
+        runnable.run();
+    }
+}
+
+@Import(AsyncTransaction.class)
 @DataJpaTest
+@TestPropertySource(
+        properties = {
+                "spring.sql.init.mode=embedded",
+                "spring.sql.init.schema-locations=classpath:schema.sql",
+                "spring.sql.init.data-locations=classpath:data.sql",
+                "spring.jpa.defer-datasource-initialization=true"
+        }
+)
 public class BlogSearchRepositoryTest {
-
     @Autowired
-    private TestEntityManager entityManager;
+    private AsyncTransaction asyncTransaction;
 
     @Autowired
     private BlogSearchRepository blogSearchRepository;
 
+    void sleep(int millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
     @Test
-    public void testFindByKeyword() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(2);
-        ExecutorService executorService = Executors.newFixedThreadPool(2);
+    public void optimistic_lock_with_repository() {
+        CompletableFuture<Void> tx = CompletableFuture.runAsync(() -> asyncTransaction.run(() -> {
+            BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword("test").orElseThrow(NullPointerException::new);
+            blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
+            sleep(1000);
+        }));
+        CompletableFuture.runAsync(() -> asyncTransaction.run(() -> {
+            BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword("test").orElseThrow(NullPointerException::new);
+            blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
+        })).join();
+        tx.join();
 
-        // when
-        entityManager.clear();
-        BlogSearchEntity result1 = blogSearchRepository.findByKeyword("test");
-        BlogSearchEntity result2 = blogSearchRepository.findByKeyword("test");
-
-        executorService.submit(() -> {
-            entityManager.clear();
-            BlogSearchEntity entity1 = entityManager.find(BlogSearchEntity.class, result1.getKeyword());
-            entity1.setHitCount(entity1.getHitCount());
-            blogSearchRepository.save(entity1);
-            latch.countDown();
-        });
-
-        executorService.submit(() -> {
-            entityManager.clear();
-            BlogSearchEntity entity2 = entityManager.find(BlogSearchEntity.class, result2.getKeyword());
-            entity2.setHitCount(entity2.getHitCount());
-            blogSearchRepository.save(entity2);
-            latch.countDown();
-        });
-
-        latch.await(1, TimeUnit.SECONDS);
-
-        // then
-        Assertions.assertThrows(OptimisticLockingFailureException.class, () -> entityManager.flush());
-//        entityManager.flush();
-        BlogSearchEntity result = blogSearchRepository.findByKeyword("test");
-        Assertions.assertEquals(2, result.getHitCount());
+        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword("test").orElseThrow(NullPointerException::new);
+        assertThat(blogSearchEntity.getHitCount(), equalTo(3L));
     }
 }
+
+/**
+ * https://junhyunny.github.io/spring-boot/jpa/junit/jpa-pessimitic-lock/ 참고
+ */

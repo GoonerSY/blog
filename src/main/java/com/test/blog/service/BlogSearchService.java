@@ -1,10 +1,12 @@
 package com.test.blog.service;
 
 import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.test.blog.domain.BlogSearchReq;
 import com.test.blog.domain.BlogSearchResp;
 import com.test.blog.domain.kakao.Documents;
 import com.test.blog.domain.kakao.Meta;
+import com.test.blog.domain.naver.Items;
 import com.test.blog.entity.BlogSearchEntity;
 import com.test.blog.repository.BlogSearchRepository;
 import org.json.simple.JSONArray;
@@ -14,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -23,6 +26,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import javax.validation.Valid;
 import java.text.SimpleDateFormat;
+import java.util.List;
 
 @Service
 @Validated
@@ -35,62 +39,95 @@ public class BlogSearchService {
     @Autowired
     private BlogSearchRepository blogSearchRepository;
 
+    @Transactional
     public BlogSearchResp blogSearch(@Valid BlogSearchReq blogSearchReq) throws Exception {
         /* 기본값 설정 */
-        if(blogSearchReq.getSort() == null) blogSearchReq.setSort("accuracy");
-        if(blogSearchReq.getPage() == 0) blogSearchReq.setPage(1);
-        if(blogSearchReq.getSize() == 0) blogSearchReq.setSize(10);
+        String query = blogSearchReq.getKeyword();
+        String sort;
+        int page;
+        int size;
+        if(blogSearchReq.getSort() == null) sort = "accuracy"; else sort = blogSearchReq.getSort();
+        if(blogSearchReq.getPage() == 0) page = 1;             else page = blogSearchReq.getPage();
+        if(blogSearchReq.getSize() == 0) size = 10;            else size = blogSearchReq.getSize();
 
         /* 키워드 카운팅 */
         keywordCounting(blogSearchReq.getKeyword());
 
-        /* 요청값 쿼리스트링 변환처리 */
-        MultiValueMap<String, String> requestParams = new LinkedMultiValueMap<String, String>();
-        UriComponents uriComponents;
-        /* 카카오 API 서비스 연동 */
+        /* API 서비스 연동 */
         BlogSearchResp blogSearchResp;
         try{
-            String query = blogSearchReq.getKeyword();
+            /* 지정 블로그 검색 기능은 카카오만 제공 */
             if(blogSearchReq.getTargetBlog() != null && !blogSearchReq.getTargetBlog().trim().equals("")){
                 query = blogSearchReq.getTargetBlog() + " " + blogSearchReq.getKeyword();
             }
-            requestParams.clear();
-            requestParams.add("query", query);
-            requestParams.add("sort", blogSearchReq.getSort());
-            requestParams.add("page", String.valueOf(blogSearchReq.getPage()));
-            requestParams.add("size", String.valueOf(blogSearchReq.getSize()));
-            uriComponents = UriComponentsBuilder.newInstance().queryParams(requestParams).build();
-
-            blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "kakao", kakaoApiService.getApiCaller("/v2/search/blog" + uriComponents.toUri()));
+            blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "kakao",
+                            kakaoApiService.getApiCaller("/v2/search/blog" + convertRequestData("kakao", query, sort, page, size)));
         } catch(Exception e) {
-            requestParams.clear();
-            requestParams.add("query", blogSearchReq.getKeyword());
-            if(blogSearchReq.getSort().equals("accuracy")) requestParams.add("sort", "sim");
-            else requestParams.add("sort", "date");
-            requestParams.add("start", String.valueOf(blogSearchReq.getPage()));
-            requestParams.add("display", String.valueOf(blogSearchReq.getSize()));
-            uriComponents = UriComponentsBuilder.newInstance().queryParams(requestParams).build();
-
-            blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "naver", naverApiService.getApiCaller("/v1/search/blog.json" + uriComponents.toUri()));
+            blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "naver",
+                            naverApiService.getApiCaller("/v1/search/blog.json" + convertRequestData("naver", query, sort, page, size)));
         }
 
         return blogSearchResp;
     }
 
-    @Transactional
+    /**
+     * 검색한 keyword를 카운팅
+     * @param keyword
+     */
     public void keywordCounting(String keyword) {
-        /* 검색 키워드 카운팅 */
-        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword(keyword);
-        if(blogSearchEntity == null){
-            blogSearchEntity = new BlogSearchEntity();
-            blogSearchEntity.setKeyword(keyword);
-            blogSearchEntity.setHitCount(1L);
-        } else {
-            blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
-        }
-        blogSearchRepository.saveAndFlush(blogSearchEntity);
+        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword(keyword).orElse(BlogSearchEntity.builder().
+                                                                                                                keyword(keyword).
+                                                                                                                hitCount(1L).build());
+        blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
+        blogSearchRepository.save(blogSearchEntity);
     }
 
+    /**
+     * 정보제공사 요청 전문 변환
+     *
+     * @param infoProvider
+     * @param query
+     * @param sort
+     * @param page
+     * @param size
+     * @return
+     * @throws Exception
+     */
+    public UriComponents convertRequestData(String infoProvider, String query, String sort, int page, int size) throws Exception {
+
+        MultiValueMap<String, String> requestParams = new LinkedMultiValueMap<String, String>();
+
+        UriComponents uriComponents;
+        if(infoProvider.equals("kakao")){
+            requestParams.clear();
+            requestParams.add("query", query);
+            requestParams.add("sort", sort);
+            requestParams.add("page", String.valueOf(page));
+            requestParams.add("size", String.valueOf(size));
+            uriComponents = UriComponentsBuilder.newInstance().queryParams(requestParams).build();
+        } else {
+            requestParams.clear();
+            requestParams.add("query", query);
+            if(sort.equals("accuracy")) requestParams.add("sort", "sim");
+            else requestParams.add("sort", "date");
+            requestParams.add("start", String.valueOf(page));
+            requestParams.add("display", String.valueOf(size));
+            uriComponents = UriComponentsBuilder.newInstance().queryParams(requestParams).build();
+        }
+
+        return uriComponents;
+    }
+
+    /**
+     * 정보제공사 응답 전문 변환
+     *
+     * @param page
+     * @param size
+     * @param infoProvider
+     * @param responseData
+     * @return
+     * @throws Exception
+     */
     public BlogSearchResp convertResponseData(int page, int size, String infoProvider, String responseData) throws Exception {
         Gson gson = new Gson();
         logger.info("responseData : [{}]", responseData);
@@ -122,16 +159,16 @@ public class BlogSearchService {
                                     .is_end(is_end).build());
 
             /* Documents 객체 구성 */
-            JSONArray items = (JSONArray)responseObject.get("items");
+            List<Items> itemList = gson.fromJson(responseObject.get("items").toString(), new TypeToken<List<Items>>(){}.getType());
             SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMdd");
-            for (JSONObject item : (Iterable<JSONObject>) items) {
+            for (Items item : itemList) {
                 blogSearchResp.getDocuments().add(Documents.builder()
-                                                            .title(item.get("title").toString())
-                                                            .contents(item.get("description").toString())
-                                                            .url(item.get("link").toString())
-                                                            .blogname(item.get("bloggername").toString())
+                                                            .title(item.getTitle())
+                                                            .contents(item.getDescription())
+                                                            .url(item.getLink())
+                                                            .blogname(item.getBloggername())
                                                             .thumbnail(null)
-                                                            .datetime(formatter.parse(item.get("postdate").toString())).build());
+                                                            .datetime(formatter.parse(item.getPostdate())).build());
             }
         }
 
