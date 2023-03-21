@@ -10,6 +10,8 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.concurrent.*;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -17,7 +19,6 @@ import static org.hamcrest.Matchers.equalTo;
 
 @Component
 class AsyncTransaction {
-
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void run(Runnable runnable) {
         runnable.run();
@@ -35,11 +36,14 @@ class AsyncTransaction {
         }
 )
 public class BlogSearchRepositoryTest {
-    @Autowired
-    private AsyncTransaction asyncTransaction;
 
+    private final AsyncTransaction asyncTransaction;
+    private final BlogSearchRepository blogSearchRepository;
     @Autowired
-    private BlogSearchRepository blogSearchRepository;
+    public BlogSearchRepositoryTest(AsyncTransaction asyncTransaction, BlogSearchRepository blogSearchRepository) {
+        this.asyncTransaction = asyncTransaction;
+        this.blogSearchRepository = blogSearchRepository;
+    }
 
     void sleep(int millis) {
         try {
@@ -50,18 +54,20 @@ public class BlogSearchRepositoryTest {
     }
     @Test
     public void optimistic_lock_with_repository() {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        String today = sdf.format(new Date(System.currentTimeMillis()));
         CompletableFuture<Void> tx = CompletableFuture.runAsync(() -> asyncTransaction.run(() -> {
-            BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword("test").orElseThrow(NullPointerException::new);
+            BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeywordAndInfoProviderAndDate("test", "kakao", today).orElseThrow(NullPointerException::new);
             blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
             sleep(1000);
         }));
         CompletableFuture.runAsync(() -> asyncTransaction.run(() -> {
-            BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword("test").orElseThrow(NullPointerException::new);
+            BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeywordAndInfoProviderAndDate("test", "kakao", today).orElseThrow(NullPointerException::new);
             blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
         })).join();
         tx.join();
 
-        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword("test").orElseThrow(NullPointerException::new);
+        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeywordAndInfoProviderAndDate("test", "kakao", today).orElseThrow(NullPointerException::new);
         assertThat(blogSearchEntity.getHitCount(), equalTo(3L));
     }
 }

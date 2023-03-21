@@ -8,11 +8,9 @@ import org.springframework.stereotype.Repository;
 
 import javax.persistence.LockModeType;
 import javax.persistence.QueryHint;
+import java.util.List;
 import java.util.Optional;
 
-@Repository
-public interface BlogSearchRepository extends JpaRepository<BlogSearchEntity, String>, BlogSearchRepositoryCustom {
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @QueryHints({@QueryHint(name = "javax.persistence.lock.timeout", value ="3000")})
-    Optional<BlogSearchEntity> findByKeywordAndInfoProviderAndDate(String keyword, String infoProvider, String date);
+public interface BlogSearchRepositoryCustom {
+    List<BlogSearchEntity> trendList(String date, String infoProvider);
 }

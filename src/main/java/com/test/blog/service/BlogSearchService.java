@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -172,12 +173,17 @@ public class BlogSearchService {
      */
     public void keywordCounting(String keyword, String infoProvider) {
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
-        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword(keyword).orElse(BlogSearchEntity.builder().
-                keyword(keyword).
-                infoProvider(infoProvider).
-                date(sdf.format(new Date(System.currentTimeMillis()))).
-                hitCount(1L).build());
-        blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
+        String today = sdf.format(new Date(System.currentTimeMillis()));
+        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeywordAndInfoProviderAndDate(keyword, infoProvider, today).orElse(null);
+        if(blogSearchEntity == null){
+            blogSearchEntity = BlogSearchEntity.builder()
+                    .keyword(keyword)
+                    .infoProvider(infoProvider)
+                    .date(today)
+                    .hitCount(1L).build();
+        } else {
+            blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
+        }
         blogSearchRepository.save(blogSearchEntity);
     }
 }
