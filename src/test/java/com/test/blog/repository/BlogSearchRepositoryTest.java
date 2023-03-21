@@ -65,7 +65,3 @@ public class BlogSearchRepositoryTest {
         assertThat(blogSearchEntity.getHitCount(), equalTo(3L));
     }
 }
-
-/**
- * https://junhyunny.github.io/spring-boot/jpa/junit/jpa-pessimitic-lock/ 참고
- */

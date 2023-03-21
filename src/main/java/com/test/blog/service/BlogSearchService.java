@@ -9,14 +9,12 @@ import com.test.blog.domain.kakao.Meta;
 import com.test.blog.domain.naver.Items;
 import com.test.blog.entity.BlogSearchEntity;
 import com.test.blog.repository.BlogSearchRepository;
-import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -26,18 +24,23 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import javax.validation.Valid;
 import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
 
 @Service
 @Validated
 public class BlogSearchService {
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
+
+    private final KakaoApiService kakaoApiService;
+    private final NaverApiService naverApiService;
+    private final BlogSearchRepository blogSearchRepository;
     @Autowired
-    private KakaoApiService kakaoApiService;
-    @Autowired
-    private NaverApiService naverApiService;
-    @Autowired
-    private BlogSearchRepository blogSearchRepository;
+    public BlogSearchService(KakaoApiService kakaoApiService, NaverApiService naverApiService, BlogSearchRepository blogSearchRepository) {
+        this.kakaoApiService = kakaoApiService;
+        this.naverApiService = naverApiService;
+        this.blogSearchRepository = blogSearchRepository;
+    }
 
     @Transactional
     public BlogSearchResp blogSearch(@Valid BlogSearchReq blogSearchReq) throws Exception {
@@ -49,9 +52,6 @@ public class BlogSearchService {
         if(blogSearchReq.getSort() == null) sort = "accuracy"; else sort = blogSearchReq.getSort();
         if(blogSearchReq.getPage() == 0) page = 1;             else page = blogSearchReq.getPage();
         if(blogSearchReq.getSize() == 0) size = 10;            else size = blogSearchReq.getSize();
-
-        /* 키워드 카운팅 */
-        keywordCounting(blogSearchReq.getKeyword());
 
         /* API 서비스 연동 */
         BlogSearchResp blogSearchResp;
@@ -67,19 +67,10 @@ public class BlogSearchService {
                             naverApiService.getApiCaller("/v1/search/blog.json" + convertRequestData("naver", query, sort, page, size)));
         }
 
-        return blogSearchResp;
-    }
+        /* 키워드 카운팅 */
+        keywordCounting(blogSearchReq.getKeyword(), blogSearchResp.getMeta().getInfoProvider());
 
-    /**
-     * 검색한 keyword를 카운팅
-     * @param keyword
-     */
-    public void keywordCounting(String keyword) {
-        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword(keyword).orElse(BlogSearchEntity.builder().
-                                                                                                                keyword(keyword).
-                                                                                                                hitCount(1L).build());
-        blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
-        blogSearchRepository.save(blogSearchEntity);
+        return blogSearchResp;
     }
 
     /**
@@ -173,5 +164,20 @@ public class BlogSearchService {
         }
 
         return blogSearchResp;
+    }
+
+    /**
+     * 검색한 keyword를 카운팅
+     * @param keyword
+     */
+    public void keywordCounting(String keyword, String infoProvider) {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        BlogSearchEntity blogSearchEntity = blogSearchRepository.findByKeyword(keyword).orElse(BlogSearchEntity.builder().
+                keyword(keyword).
+                infoProvider(infoProvider).
+                date(sdf.format(new Date(System.currentTimeMillis()))).
+                hitCount(1L).build());
+        blogSearchEntity.setHitCount(blogSearchEntity.getHitCount() + 1);
+        blogSearchRepository.save(blogSearchEntity);
     }
 }

@@ -11,7 +11,6 @@ import reactor.core.publisher.Mono;
 @Service
 public class KakaoApiService {
     private static final String KAKAO_DAUM_API_BASE_URI = "dapi.kakao.com";
-
     private static final String KAKAO_APP_RESTAPI_KEY = "3838bb9d56ac50f869fa6c41e874d5cb";
 
     public String getApiCaller(String uri) throws Exception {

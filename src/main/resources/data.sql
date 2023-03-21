@@ -1,1 +1,1 @@
-insert into blog_search_entity(keyword, hit_count) values ('test', 1);
+insert into blog_search_entity(keyword, info_provider, date, hit_count) values ('test', 'kakao', '2023-03-21', 1);

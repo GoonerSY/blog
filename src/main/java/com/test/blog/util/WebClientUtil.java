@@ -3,6 +3,7 @@ package com.test.blog.util;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
+import io.netty.resolver.DefaultAddressResolverGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,27 +25,19 @@ public class WebClientUtil {
     public static WebClient getBaseUrl(final String uri) {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 3000)
-                .responseTimeout(Duration.ofMillis(3000))
+                .responseTimeout(Duration.ofMillis(5000))
                 .doOnConnected(conn ->
-                        conn.addHandlerLast(new ReadTimeoutHandler(3000, TimeUnit.MILLISECONDS))
-                            .addHandlerLast(new WriteTimeoutHandler(3000, TimeUnit.MILLISECONDS)));
-
-        ExchangeStrategies exchangeStrategies = ExchangeStrategies.builder()
-                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(1024*1024*50))
-                .build();
-        exchangeStrategies
-                .messageWriters().stream()
-                .filter(LoggingCodecSupport.class::isInstance)
-                .forEach(writer -> ((LoggingCodecSupport)writer).setEnableLoggingRequestDetails(true));
+                        conn.addHandlerLast(new ReadTimeoutHandler(5000, TimeUnit.MILLISECONDS))
+                            .addHandlerLast(new WriteTimeoutHandler(5000, TimeUnit.MILLISECONDS)))
+                .resolver(DefaultAddressResolverGroup.INSTANCE);
 
         return WebClient.builder()
                 .baseUrl(uri)
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
-                .exchangeStrategies(exchangeStrategies)
                 .filter(ExchangeFilterFunction.ofRequestProcessor(
                         clientRequest -> {
-                            log.debug("Request: {} {}", clientRequest.method(), clientRequest.url());
                             clientRequest.headers().forEach((name, values) -> values.forEach(value -> log.debug("{} : {}", name, value)));
+                            log.debug("Request: {} {}", clientRequest.method(), clientRequest.url());
                             return Mono.just(clientRequest);
                         }
                 ))
@@ -54,8 +47,6 @@ public class WebClientUtil {
                             return Mono.just(clientResponse);
                         }
                 ))
-                .build()
-                .mutate()
                 .build();
     }
 }
