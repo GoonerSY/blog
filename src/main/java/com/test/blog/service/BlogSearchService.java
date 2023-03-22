@@ -11,17 +11,20 @@ import com.test.blog.entity.BlogSearchEntity;
 import com.test.blog.repository.BlogSearchRepository;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.util.UriComponents;
 import org.springframework.web.util.UriComponentsBuilder;
+import reactor.core.publisher.Mono;
 
 import javax.validation.Valid;
 import java.text.SimpleDateFormat;
@@ -55,7 +58,7 @@ public class BlogSearchService {
         if(blogSearchReq.getSize() == 0) size = 10;            else size = blogSearchReq.getSize();
 
         /* API 서비스 연동 */
-        BlogSearchResp blogSearchResp;
+        BlogSearchResp blogSearchResp = null;
         try{
             /* 지정 블로그 검색 기능은 카카오만 제공 */
             if(blogSearchReq.getTargetBlog() != null && !blogSearchReq.getTargetBlog().trim().equals("")){
@@ -64,8 +67,13 @@ public class BlogSearchService {
             blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "kakao",
                             kakaoApiService.getApiCaller("/v2/search/blog" + convertRequestData("kakao", query, sort, page, size)));
         } catch(Exception e) {
-            blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "naver",
-                            naverApiService.getApiCaller("/v1/search/blog.json" + convertRequestData("naver", query, sort, page, size)));
+            /* connection 오류나 5XX 오류의 경우 네이버로 검색 */
+            if(e instanceof WebClientRequestException || e instanceof WebClientResponseException) {
+                blogSearchResp = convertResponseData(blogSearchReq.getPage(), blogSearchReq.getSize(), "naver",
+                        naverApiService.getApiCaller("/v1/search/blog.json" + convertRequestData("naver", query, sort, page, size)));
+            } else {
+                throw new Exception();
+            }
         }
 
         /* 키워드 카운팅 */
@@ -85,7 +93,7 @@ public class BlogSearchService {
      * @return
      * @throws Exception
      */
-    public UriComponents convertRequestData(String infoProvider, String query, String sort, int page, int size) throws Exception {
+    public UriComponents convertRequestData(String infoProvider, String query, String sort, int page, int size) {
 
         MultiValueMap<String, String> requestParams = new LinkedMultiValueMap<String, String>();
 
@@ -116,12 +124,15 @@ public class BlogSearchService {
      * @param page
      * @param size
      * @param infoProvider
-     * @param responseData
+     * @param responseMono
      * @return
      * @throws Exception
      */
-    public BlogSearchResp convertResponseData(int page, int size, String infoProvider, String responseData) throws Exception {
+    public BlogSearchResp convertResponseData(int page, int size, String infoProvider, Mono<String> responseMono) throws ParseException, java.text.ParseException {
         Gson gson = new Gson();
+
+        String responseData = responseMono.block();
+
         logger.info("responseData : [{}]", responseData);
         BlogSearchResp blogSearchResp = new BlogSearchResp();
         if(infoProvider.equals("kakao")){
